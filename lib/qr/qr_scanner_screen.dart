@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:url_launcher/url_launcher.dart'; // Добавь этот пакет
 
 class QrScannerScreen extends StatefulWidget {
   const QrScannerScreen({super.key});
@@ -14,6 +15,7 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
   String result = 'Наведите камеру на QR-код';
   bool _hasPermission = false;
   bool _isLoading = true;
+  bool _isScanning = true;
 
   @override
   void initState() {
@@ -44,21 +46,73 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
   }
 
   void _handleBarcode(BarcodeCapture capture) {
+    if (!_isScanning) return;
+    
     final String? code = capture.barcodes.first.rawValue;
     if (code != null) {
       setState(() {
-        result = code;
+        result = 'Найден код: $code';
+        _isScanning = false;
       });
 
-      // Закрываем экран через 1 секунду с результатом
-      Future.delayed(const Duration(seconds: 1), () {
-        if (mounted) {
-          Navigator.pop(context, code);
-        }
-      });
+      controller.stop();
+
+      // Показываем диалог с действиями
+      _showResultDialog(code);
     }
   }
 
+  void _showResultDialog(String code) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('QR-код распознан'),
+        content: Text(code),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Закрыть'),
+          ),
+          // Если это ссылка - показываем кнопку "Открыть"
+          if (_isUrl(code))
+            TextButton(
+              onPressed: () {
+                Navigator.pop(context);
+                _launchUrl(code);
+              },
+              child: const Text('Открыть в браузере'),
+            ),
+        ],
+      ),
+    );
+  }
+
+  // Проверяем, является ли текст ссылкой
+  bool _isUrl(String text) {
+    return text.startsWith('http://') || text.startsWith('https://');
+  }
+
+  // Открываем ссылку в браузере
+Future<void> _launchUrl(String url) async {
+  final Uri uri = Uri.parse(url);
+  
+  try {
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(
+        uri,
+        mode: LaunchMode.externalApplication, // Важно: открывает в браузере
+      );
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Не удалось открыть: $url')),
+      );
+    }
+  } catch (e) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Ошибка: $e')),
+    );
+  }
+}
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -82,11 +136,21 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
           flex: 4,
           child: Stack(
             children: [
-              MobileScanner(
-                controller: controller,
-                onDetect: _handleBarcode,
-              ),
-              // 👇 Красная рамка в центре
+              _isScanning 
+                  ? MobileScanner(
+                      controller: controller,
+                      onDetect: _handleBarcode,
+                    )
+                  : Container(
+                      color: Colors.black,
+                      child: const Center(
+                        child: Icon(
+                          Icons.check_circle,
+                          color: Colors.green,
+                          size: 64,
+                        ),
+                      ),
+                    ),
               Center(
                 child: Container(
                   width: 250,
